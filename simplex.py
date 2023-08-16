@@ -66,11 +66,20 @@ class LinearProgram:
         """
         m, n = self.A.shape
 
-        A = None  # TODO
-        b = None  # TODO
-        c = None  # TODO
-
-        return LinearProgram(A, b, c)
+        # Add artificial variables to A
+        artificial_matrix = np.eye(m)
+        A_modified = np.hstack((self.A, artificial_matrix))
+    
+        # Modify b (it remains the same in this case)
+        b_modified = self.b
+    
+        # Modify c to minimize the sum of artificial variables
+        c_modified = np.hstack((np.zeros(n), np.ones(m)))
+    
+        # The basis for the modified LP consists of the artificial variables
+        basis = list(range(n, n+m))
+    
+        return LinearProgram(A_modified, b_modified, c_modified), basis
 
 
 def simplex_step(lp: LinearProgram, basis: Basis) -> Tuple[Status, Optional[np.array(int)]]:
@@ -78,21 +87,63 @@ def simplex_step(lp: LinearProgram, basis: Basis) -> Tuple[Status, Optional[np.a
         Returns a tuple containing the status of the solver, and the updated basis
         if status is CANDIDATE, else None.
     """
+    # Calculate reduced costs
+    c_b = lp.c[basis]
+    B = lp.A[:, basis]
+    B_inv = np.linalg.inv(B)
+    reduced_costs = lp.c - c_b.T @ B_inv @ lp.A
 
-    # TODO
-    raise NotImplementedError
+    # Check for optimality
+    if np.all(reduced_costs >= 0):
+        return Status.OPTIMAL, basis
 
+    # Determine entering variable
+    entering_var = np.argmin(reduced_costs)
+
+    # Determine leaving variable
+    y = B_inv @ lp.A[:, entering_var]
+    ratios = lp.b / y
+    if np.all(y <= 0):
+        return Status.UNBOUNDED, None
+    leaving_var_index = np.argmin(ratios)
+    leaving_var = basis[leaving_var_index]
+
+    # Pivot
+    basis[leaving_var_index] = entering_var
+
+    return Status.CANDIDATE, basis
 
 def simplex_step_opt(lp: LinearProgram, basis: Basis) -> Tuple[Status, Optional[np.array(int)]]:
     """ One step of the simplex algorithm. Uses the LU factorisation optimisation.
         Returns a tuple containing the status of the solver, and the updated basis
         if status is CANDIDATE, else None.
     """
+    # Calculate reduced costs using LU factorization
+    c_b = lp.c[basis]
+    B = lp.A[:, basis]
+    lu, piv = lu_factor(B)
+    pi = lu_solve((lu, piv), c_b)
+    reduced_costs = lp.c - pi @ lp.A
 
-    # TODO
-    raise NotImplementedError
+    # Check for optimality
+    if np.all(reduced_costs >= 0):
+        return Status.OPTIMAL, basis
 
+    # Determine entering variable
+    entering_var = np.argmin(reduced_costs)
 
+    # Determine leaving variable using LU factorization
+    y = lu_solve((lu, piv), lp.A[:, entering_var])
+    ratios = lp.b / y
+    if np.all(y <= 0):
+        return Status.UNBOUNDED, None
+    leaving_var_index = np.argmin(ratios)
+    leaving_var = basis[leaving_var_index]
+
+    # Pivot
+    basis[leaving_var_index] = entering_var
+
+    return Status.CANDIDATE, basis
 def simplex(lp: LinearProgram, opt: bool) -> Dict:
     """
     Solves a LinearProgram using simplex algorithm
@@ -108,15 +159,36 @@ def simplex(lp: LinearProgram, opt: bool) -> Dict:
         basis: variable indices of the current BFS [when OPTIMAL]
         objective: objective value [when OPTIMAL]
     """
+    """ Solves a LinearProgram using simplex algorithm """
+        # Initializations
+    status = Status.CANDIDATE
+    bfs_pivots = 0
+    opt_pivots = 0
+    basis = None  # Initialize with the starting BFS
 
-    # TODO
-    return {"status": None,  # TODO
-            "bfs_pivots": None,  # TODO
-            "opt_pivots": None,  # TODO
-            "x": None,  # TODO
-            "basis": None,  # TODO
-            "objective": None,  # TODO
-            }
+    while status == Status.CANDIDATE:
+        if opt:
+            status, new_basis = simplex_step_opt(lp, basis)
+        else:
+            status, new_basis = simplex_step(lp, basis)
+        
+        if status == Status.CANDIDATE:
+            basis = new_basis
+            opt_pivots += 1
+        elif status in [Status.OPTIMAL, Status.UNBOUNDED]:
+            break
+
+    x = lp.x  # Solution vector
+    objective = np.dot(lp.c, x)  # Objective value
+
+    return {
+        "status": status,
+        "bfs_pivots": bfs_pivots,
+        "opt_pivots": opt_pivots,
+        "x": x,
+        "basis": basis,
+        "objective": objective
+    }
 
 
 if __name__ == "__main__":
